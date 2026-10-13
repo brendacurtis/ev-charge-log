@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f766e">
+<title>EV Charge Log</title>
+<style>
+  :root { --bg:#f4f6f7; --card:#fff; --text:#1b2428; --muted:#667; --accent:#0f766e; --danger:#b42318; --line:#e2e6e8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12181b; --card:#1b2428; --text:#eef2f3; --muted:#9aa7ad; --accent:#2dd4bf; --danger:#f97066; --line:#2c373c; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font:16px system-ui,sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:520px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.3rem; margin:4px 0 14px; }
+  .card { background:var(--card); border-radius:14px; padding:14px; margin-bottom:14px; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .totals { display:flex; gap:10px; }
+  .totals div { flex:1; text-align:center; }
+  .totals b { display:block; font-size:1.4rem; color:var(--accent); }
+  .totals span { font-size:.8rem; color:var(--muted); }
+  label { display:block; font-size:.85rem; color:var(--muted); margin:10px 0 4px; }
+  input { width:100%; padding:12px; font-size:1rem; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--text); }
+  .row { display:flex; gap:10px; } .row > div { flex:1; }
+  button { font:inherit; border:0; border-radius:10px; padding:12px 16px; cursor:pointer; }
+  .primary { width:100%; margin-top:14px; background:var(--accent); color:#fff; font-weight:600; }
+  @media (prefers-color-scheme: dark) { .primary { color:#06201d; } }
+  .entry { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-top:1px solid var(--line); }
+  .entry:first-child { border-top:0; }
+  .entry small { color:var(--muted); display:block; }
+  .entry .cost { font-weight:600; margin-right:8px; }
+  .link { background:none; color:var(--accent); padding:6px 8px; }
+  .link.del { color:var(--danger); }
+  .tools { display:flex; justify-content:space-between; align-items:center; }
+  .empty { color:var(--muted); text-align:center; padding:12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>⚡ EV Charge Log</h1>
+
+  <div class="card totals">
+    <div><b id="tMonth">$0.00</b><span>This month</span></div>
+    <div><b id="tAll">$0.00</b><span>All time</span></div>
+    <div><b id="tCount">0</b><span>Sessions</span></div>
+  </div>
+
+  <form class="card" id="form">
+    <div class="row">
+      <div><label for="date">Date</label><input type="date" id="date" required></div>
+      <div><label for="time">Time</label><input type="time" id="time" required></div>
+    </div>
+    <label for="charger">Charger number</label>
+    <input id="charger" required autocomplete="off">
+    <label for="location">Location</label>
+    <input id="location" autocomplete="off" required>
+    <div class="row">
+      <div><label for="kwh">kWh</label><input type="number" id="kwh" step="0.01" min="0" inputmode="decimal" required></div>
+      <div><label for="cost">Cost ($)</label><input type="number" id="cost" step="0.01" min="0" inputmode="decimal" required></div>
+    </div>
+    <button class="primary" id="save">Add session</button>
+  </form>
+
+  <div class="card">
+    <div class="tools">
+      <strong>History</strong>
+      <button class="link" id="export">Export CSV</button>
+    </div>
+    <div id="list"></div>
+  </div>
+</main>
+
+<script>
+const KEY = 'evChargeLog';
+const $ = id => document.getElementById(id);
+let items = [];
+try { items = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) {}
+let editingId = null;
+
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) { alert('Could not save data on this browser.'); } };
+const money = n => '$' + n.toFixed(2);
+const pad = n => String(n).padStart(2, '0');
+
+function setNow() {
+  const d = new Date();
+  $('date').value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  $('time').value = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function render() {
+  const sorted = [...items].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+  const month = new Date().toISOString().slice(0, 7);
+  const now = new Date(), ym = `${now.getFullYear()}-${pad(now.getMonth()+1)}`;
+  $('tAll').textContent = money(items.reduce((s, i) => s + i.cost, 0));
+  $('tMonth').textContent = money(items.filter(i => i.date.startsWith(ym)).reduce((s, i) => s + i.cost, 0));
+  $('tCount').textContent = items.length;
+  $('list').innerHTML = sorted.length ? '' : '<div class="empty">No sessions yet.</div>';
+  for (const i of sorted) {
+    const el = document.createElement('div');
+    el.className = 'entry';
+    const left = document.createElement('div');
+    const strong = document.createElement('strong');
+    strong.textContent = 'Charger ' + i.charger;
+    const small = document.createElement('small');
+    const kwh = i.kwh || 0;
+    small.textContent = `${i.date} · ${i.time} · ${i.location || ''}` +
+      (kwh ? ` · ${kwh} kWh · ${money(i.cost / kwh)}/kWh` : '');
+    left.append(strong, small);
+    const right = document.createElement('div');
+    const cost = document.createElement('span');
+    cost.className = 'cost'; cost.textContent = money(i.cost);
+    const edit = document.createElement('button');
+    edit.className = 'link'; edit.textContent = 'Edit'; edit.onclick = () => startEdit(i.id);
+    const del = document.createElement('button');
+    del.className = 'link del'; del.textContent = 'Delete';
+    del.onclick = () => { if (confirm('Delete this session?')) { items = items.filter(x => x.id !== i.id); save(); render(); } };
+    right.append(cost, edit, del);
+    el.append(left, right);
+    $('list').append(el);
+  }
+}
+
+function startEdit(id) {
+  const i = items.find(x => x.id === id);
+  editingId = id;
+  $('date').value = i.date; $('time').value = i.time; $('charger').value = i.charger; $('cost').value = i.cost;
+  $('location').value = i.location || ''; $('kwh').value = i.kwh || '';
+  $('save').textContent = 'Save changes';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+$('form').onsubmit = e => {
+  e.preventDefault();
+  const entry = { date: $('date').value, time: $('time').value, charger: $('charger').value.trim(), location: $('location').value.trim(), kwh: parseFloat($('kwh').value), cost: parseFloat($('cost').value) };
+  if (editingId) { Object.assign(items.find(x => x.id === editingId), entry); editingId = null; $('save').textContent = 'Add session'; }
+  else items.push({ id: Date.now(), ...entry });
+  save(); render();
+  $('charger').value = ''; $('cost').value = ''; $('kwh').value = ''; setNow();
+};
+
+$('export').onclick = () => {
+  if (!items.length) return alert('Nothing to export yet.');
+  const q = s => '"' + String(s).replace(/"/g, '""') + '"';
+  const rows = ['Date,Time,Charger,Location,kWh,Cost', ...[...items].sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
+    .map(i => [i.date, i.time, q(i.charger), q(i.location || ''), i.kwh || '', i.cost.toFixed(2)].join(','))];
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+  a.download = 'ev-charging-log.csv';
+  a.click();
+};
+
+setNow(); render();
+</script>
+</body>
+</html>
